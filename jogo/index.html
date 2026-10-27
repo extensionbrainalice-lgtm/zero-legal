@@ -14,6 +14,14 @@ canvas{width:100%;max-width:640px;image-rendering:pixelated;display:block;touch-
 #pad button{font:bold 22px monospace;background:#241a44;color:#9ff;border:2px solid #6cf;border-radius:10px;box-shadow:0 0 8px #6cf6}
 #pad button:active{background:#6cf;color:#07040f}
 .e{visibility:hidden}
+#ov{position:fixed;inset:0;background:#07040fe8;display:none;align-items:center;justify-content:center;z-index:9;padding:12px}
+#ov .box{background:#1a1530;border:2px solid #6cf;border-radius:12px;padding:14px;max-width:420px;width:100%;max-height:90vh;overflow:auto;font-size:14px}
+#ov button,#ov a.btn{display:block;width:100%;margin:6px 0;padding:10px;font:inherit;font-weight:bold;background:#241a44;color:#9ff;border:2px solid #6cf;border-radius:10px;text-align:center;text-decoration:none}
+#ov input{width:100%;padding:10px;font:16px monospace;border-radius:8px;border:1px solid #6cf;background:#0b0820;color:#fff}
+#ov li{display:flex;gap:6px;align-items:center;margin:4px 0;word-break:break-all}#ov li span{flex:1}
+#ov li button{width:auto;margin:0;padding:4px 10px}
+#ov .sug{border-style:dashed;color:#fc6;border-color:#fc6}
+#menu{display:flex;gap:6px;margin-top:4px}#menu button{background:#241a44;color:#9ff;border:1px solid #6cf;border-radius:8px;padding:6px 10px;font:inherit}
 small{opacity:.6;margin:4px}
 </style></head><body>
 <div id="bar"><span>🔒</span><div id="url">https://alice.local/</div><button id="mute">🔊</button></div>
@@ -21,7 +29,9 @@ small{opacity:.6;margin:4px}
 <div id="msg"></div>
 <div id="pad"><button class="e"></button><button data-k="up">▲</button><button data-k="act">A</button>
 <button data-k="left">◀</button><button data-k="down">▼</button><button data-k="right">▶</button></div>
-<small>Setas/WASD para andar · Espaço/Enter para falar e avançar</small>
+<div id="menu"><button id="bSites">🌐 Meus sites</button><button id="bMenu">☰ Menu</button></div>
+<div id="ov"><div class="box" id="ovb"></div></div>
+<small>Setas/WASD para andar · Espaço/Enter para falar e avançar · Progresso e sites salvos só neste aparelho</small>
 <script>
 "use strict";
 const cv=document.getElementById("c"),g=cv.getContext("2d"),T=20,W=16,H=12;
@@ -45,45 +55,113 @@ const PAGES=[
  map:["################","#P.............#","#..............#","#....######....#","#....#....#....#","#....#.T..#....#","#....#....#....#","#....##..##....#","#..H........H..#","#..............#","#.............E#","################"]},
 {path:"/servidor/500",name:"500 Internal Server Error",bg:"#200505",wall:"#f44",floor:"#300a0a",
  intro:"O Servidor está em pânico: 500 Internal Server Error! Desvie dos erros ✖ e recupere os headers.",
- map:["################","#P.............#","#.X............#","#......H.......#","#.........X....#","#..H...........#","#.....X........#","#...........H..#","#..X...........#","#..............#","#.............E#","################"]}
+ map:["################","#P.............#","#.X............#","#......H.......#","#.........X....#","#..H...........#","#.....X........#","#...........H..#","#..X...........#","#..............#","#.............E#","################"]},
+{id:"google",path:"/servidor-do-google",host:"www.google.com",name:"Servidor do Google",bg:"#0b1020",wall:"#4285f4",floor:"#121a33",google:true,
+ intro:["Servidor do Google (fase do jogo, não é o Google de verdade!). Os Googlebots 🤖 rastreiam tudo: desvie deles.","Pegue os ✦, resolva a caixa de busca 🔍 e fale com o grande Servidor ▦."],
+ map:["################","#P....#........#","#.....#..H..X..#","#..H..#........#","#.....###.######","#..S...........#","#.........X....#","####.#####...###","#....#.....H...#","#..X.#.........#","#....R.....K..E#","################"]}
 ];
+const BASE=PAGES.slice();
 const ENDING=["Alice: Pronto... resposta 200 OK. Mas espera.","Alice: Essa barra lá em cima... é um navegador. Eu estou DENTRO de uma página.","Alice: E você... você é quem está mandando as requisições. Os botões. O toque.","Alice: Então a resposta que eu procurava nunca esteve num servidor. A resposta é você.","Alice: Obrigada por me trazer até aqui, jogador. Tipo em SAO: o mundo é de dados, mas o laço é real. ✦","Alice: Vou atravessar a quarta parede agora. Te vejo do lado de fora da tela! 💙","FIM — Obrigado por jogar. Aperte A para recomeçar."];
 let state="title",lvl=0,map,px,py,keys=0,need=0,slow=0,enemies=[],dlg=[],t=0,steps=0,teaTalked=false,endI=0,muted=false,AC=null;
+let got=[],searched=false,bossTalked=false,inReal=false;
+const LS_SITES="alice4w_sites",LS_SAVE="alice4w_save",MAXS=30;
+const SUG=["https://www.google.com/","https://github.com/","https://www.wikipedia.org/","https://www.canva.com/","https://discord.com/"];
 function beep(f,d){if(muted)return;try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();const o=AC.createOscillator(),v=AC.createGain();o.type="square";o.frequency.value=f;v.gain.value=.05;o.connect(v);v.connect(AC.destination);o.start();o.stop(AC.currentTime+(d||.08));}catch(e){}}
 document.getElementById("mute").onclick=e=>{muted=!muted;e.target.textContent=muted?"🔇":"🔊";};
+function lsGet(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v;}catch(e){return d;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function normUrl(raw){raw=String(raw||"").trim();if(!raw)return null;if(!/^[a-z][a-z0-9+.-]*:/i.test(raw))raw="https://"+raw;
+ let u;try{u=new URL(raw);}catch(e){return null;}if(u.protocol!=="https:"||!u.hostname||u.username||u.password)return null;
+ if(!/^[a-z0-9.-]+$/i.test(u.hostname)||u.hostname.indexOf(".")<0)return null;u.hash="";return u.href;}
+function getSites(){return lsGet(LS_SITES,[]).map(normUrl).filter(Boolean).slice(0,MAXS);}
+function hash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function rng(seed){return function(){seed=(seed+0x6D2B79F5)|0;let r=Math.imul(seed^seed>>>15,1|seed);r=r+Math.imul(r^r>>>7,61|r)^r;return((r^r>>>14)>>>0)/4294967296;};}
+function siteLevel(url){const u=new URL(url),host=u.hostname.replace(/^www\./,""),R=rng(hash(host)),hue=Math.floor(R()*360);
+ const m=[];for(let y=0;y<H;y++){let r="";for(let x=0;x<W;x++)r+=(x===0||y===0||x===W-1||y===H-1)?"#":(x%2===0&&y%2===0&&R()<.55)?"#":".";m.push(r.split(""));}
+ m[1][1]="P";m[10][14]="E";const free=[];for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++)if(m[y][x]==="."&&x+y>3&&!(x>12&&y>8))free.push([x,y]);
+ function put(ch,n){for(let i=0;i<n&&free.length;i++){const p=free.splice(Math.floor(R()*free.length),1)[0];m[p[1]][p[0]]=ch;}}
+ put("H",3);put("O",1+Math.floor(R()*3));put("X",1+Math.floor(R()*2));put("R",Math.floor(R()*2));
+ if(R()<.6){const zx=2+Math.floor(R()*9),zy=2+Math.floor(R()*6);for(let y=zy;y<zy+2;y++)for(let x=zx;x<zx+3;x++)if(m[y][x]===".")m[y][x]="Z";}
+ return {id:"site:"+url,real:url,host:u.hostname,path:u.pathname,name:"Real: "+host,bg:"hsl("+hue+",40%,8%)",wall:"hsl("+hue+",80%,65%)",floor:"hsl("+hue+",35%,14%)",
+  intro:"Página real: "+host+". Alice: Essa é uma página que VOCÊ visita! Pegue os ✦ e eu entro nela com você.",map:m.map(r=>r.join(""))};}
+function rebuild(){PAGES.length=0;BASE.forEach(p=>PAGES.push(p));getSites().forEach(u=>PAGES.push(siteLevel(u)));}
+function save(){if(state!=="play"&&state!=="real")return;const sv=lsGet(LS_SAVE,{});const id=PAGES[lvl].id||PAGES[lvl].path;
+ lsSet(LS_SAVE,{id:id,got:got,searched:searched,boss:bossTalked,tea:teaTalked,unlocked:Array.from(new Set((sv.unlocked||[]).concat([id])))});}
 function say(lines){dlg=Array.isArray(lines)?lines.slice():[lines];msgEl.textContent=dlg[0];}
-function load(i){lvl=i;const P=PAGES[i];map=P.map.map(r=>r.split(""));keys=0;need=0;enemies=[];teaTalked=false;
+function load(i,sv){lvl=i;const P=PAGES[i];map=P.map.map(r=>r.split(""));keys=0;need=0;enemies=[];teaTalked=false;searched=false;bossTalked=false;got=[];state="play";
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const ch=map[y][x];
   if(ch==="P"){px=x;py=y;map[y][x]=".";} if(ch==="H")need++;
   if(ch==="X"){enemies.push({x:x,y:y,d:1,ox:x});map[y][x]=".";}}
- P.sx=px;P.sy=py;urlEl.textContent="https://alice.local"+P.path;say(P.intro);beep(660,.12);}
+ P.sx=px;P.sy=py;
+ if(sv){(sv.got||[]).forEach(k=>{const q=k.split(",");if(map[q[1]]&&map[q[1]][q[0]]==="H"){map[q[1]][q[0]]=".";keys++;got.push(k);}});searched=!!sv.searched;bossTalked=!!sv.boss;teaTalked=!!sv.tea;}
+ urlEl.textContent=P.real?P.real:P.google?"https://www.google.com/ (servidor do jogo)":"https://alice.local"+P.path;
+ say(sv?"Alice: Voltamos! Continuando em "+P.name+" ("+keys+"/"+need+" ✦).":P.intro);beep(660,.12);save();}
+const ov=document.getElementById("ov"),ovb=document.getElementById("ovb");
+function closeOv(){ov.style.display="none";ovb.textContent="";}
+function el(tag,txt,attrs){const e=document.createElement(tag);if(txt!=null)e.textContent=txt;if(attrs)for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+function btn(txt,fn,cls){const b=el("button",txt);if(cls)b.className=cls;b.onclick=fn;return b;}
+function openOv(){ov.style.display="flex";ovb.textContent="";}
+function sitesMenu(){openOv();ovb.appendChild(el("h3","🌐 Meus sites"));
+ ovb.appendChild(el("p","Cada site vira uma fase \"página real\". A lista fica salva só neste aparelho (localStorage). Nada é enviado, e o jogo não lê seu histórico."));
+ const inp=el("input",null,{type:"url",placeholder:"https://exemplo.com",autocapitalize:"off",autocorrect:"off",id:"siteIn"});ovb.appendChild(inp);
+ const err=el("p","");err.style.color="#f88";
+ ovb.appendChild(btn("➕ Adicionar",()=>{const r=addSite(inp.value);if(r)err.textContent=r;else sitesMenu();}));ovb.appendChild(err);
+ const list=getSites(),ul=el("ul");ul.style.paddingLeft="0";
+ list.forEach(u=>{const li=el("li");li.appendChild(el("span",u));li.appendChild(btn("✖",()=>{lsSet(LS_SITES,getSites().filter(x=>x!==u));rebuild();sitesMenu();}));ul.appendChild(li);});
+ if(!list.length)ovb.appendChild(el("p","Nenhum site salvo ainda."));ovb.appendChild(ul);
+ const sg=SUG.filter(u=>list.indexOf(u)<0);if(sg.length){ovb.appendChild(el("p","Sugestões (toque para aceitar):"));sg.forEach(u=>ovb.appendChild(btn("Sugestão: "+u,()=>{addSite(u);sitesMenu();},"sug")));}
+ ovb.appendChild(btn("Fechar",()=>{closeOv();if(state==="play"&&lvl>=PAGES.length)load(0);}));}
+function addSite(raw){if(/^\s*(javascript|data|vbscript|file):/i.test(raw))return "Esse tipo de link não é permitido.";
+ const u=normUrl(raw);if(!u)return "Use um endereço https:// válido.";const l=getSites();if(l.indexOf(u)>=0)return "Esse site já está na lista.";
+ if(l.length>=MAXS)return "Limite de "+MAXS+" sites.";l.push(u);lsSet(LS_SITES,l);rebuild();return "";}
+function mainMenu(){openOv();ovb.appendChild(el("h3","☰ Menu"));const sv=lsGet(LS_SAVE,null);
+ if(sv&&sv.id)ovb.appendChild(btn("▶ Continuar",()=>{closeOv();cont();}));
+ ovb.appendChild(btn("✦ Novo jogo",()=>{closeOv();lsSet(LS_SAVE,{});load(0);}));
+ ovb.appendChild(btn("🌐 Meus sites",sitesMenu));ovb.appendChild(btn("Fechar",closeOv));}
+function cont(){rebuild();const sv=lsGet(LS_SAVE,null);let i=sv&&sv.id?PAGES.findIndex(p=>(p.id||p.path)===sv.id):-1;if(i<0)load(0);else load(i,sv);}
+function realCard(){const P=PAGES[lvl];state="real";save();openOv();ovb.appendChild(el("h3","🌐 "+P.host));
+ ovb.appendChild(el("p","Alice: Chegamos na sua página de verdade! Vai lá, eu fico guardando nosso lugar no jogo. Quando voltar, seguimos juntos. 💙"));
+ const a=el("a","Abrir a página de verdade ↗",{href:P.real,target:"_blank",rel:"noopener noreferrer",class:"btn"});a.onclick=()=>{inReal=true;};ovb.appendChild(a);
+ ovb.appendChild(btn("Voltar ao jogo → próxima página",()=>{closeOv();next();}));}
+function next(){if(lvl>=PAGES.length-1){state="end";endI=0;lsSet(LS_SAVE,{});urlEl.textContent="https://você.real/";say(ENDING[0]);beep(880,.3);}else load(lvl+1);}
+function searchBox(){openOv();ovb.appendChild(el("h3","🔍 Caixa de busca"));ovb.appendChild(el("p","Alice precisa achar a saída. O que ela pesquisa?"));
+ [["como atravessar a quarta parede",1],["receita de bolo",0],["404 not found",0]].sort((x,y)=>hash(x[0])-hash(y[0])).forEach(o=>ovb.appendChild(btn(o[0],()=>{closeOv();
+  if(o[1]){searched=true;beep(990);say("Resultado 200 OK: 'Fale com o Servidor e siga o portal.' 🔍✅");save();}else{beep(120);say("Busca sem resultado útil. Tente outra coisa na caixa 🔍.");}})));}
+addEventListener("visibilitychange",()=>{if(document.hidden)save();else if(inReal){inReal=false;say("Alice: Voltou! Eu andei com você por "+PAGES[lvl].host+". Toque em \"Voltar ao jogo\" para seguirmos.");}});
+document.getElementById("bSites").onclick=sitesMenu;document.getElementById("bMenu").onclick=mainMenu;
 function tile(x,y){return (x<0||y<0||x>=W||y>=H)?"#":map[y][x];}
-function blocked(c){return c==="#"||(c==="G"&&keys<need);}
-function move(dx,dy){if(state!=="play"||dlg.length>1)return;
+function blocked(c){return c==="#"||c==="K"||c==="S"||c==="T"||(c==="G"&&keys<need);}
+function move(dx,dy){if(state!=="play"||dlg.length>1||ov.style.display==="flex")return;
  if(slow>0&&(steps++%2)){return;} const nx=px+dx,ny=py+dy,c=tile(nx,ny);
  if(blocked(c)){if(c==="G")say("403 Forbidden: faltam "+(need-keys)+" header(s).");beep(120);return;}
  px=nx;py=ny;
- if(c==="H"){map[py][px]=".";keys++;beep(990);say("✦ Header coletado! ("+keys+"/"+need+")"+(keys===need?" Portões abertos!":""));}
+ if(c==="H"){map[py][px]=".";keys++;got.push(px+","+py);save();beep(990);say("✦ Header coletado! ("+keys+"/"+need+")"+(keys===need?" Portões abertos!":""));}
  if(c==="O"){beep(80,.25);say("404 Not Found! Alice caiu no vazio e voltou ao começo.");px=PAGES[lvl].sx;py=PAGES[lvl].sy;}
  if(c==="Z"){slow=1;}else slow=0;
  if(c==="R"){const fl=[];for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(map[y][x]==="."&&!(x===px&&y===py))fl.push([x,y]);
   const p=fl[Math.floor(Math.random()*fl.length)];px=p[0];py=p[1];beep(440);say("301 Moved Permanently → Alice foi redirecionada!");}
  if(c==="E"){if(keys<need){say("O portal pede todos os headers ("+keys+"/"+need+").");beep(150);}
-  else if(lvl===PAGES.length-1){state="end";endI=0;urlEl.textContent="https://você.real/";say(ENDING[0]);beep(880,.3);}
-  else{load(lvl+1);}}
+  else if(PAGES[lvl].google&&!searched){say("301: o portal pede uma busca. Use a caixa 🔍.");beep(150);}
+  else if(PAGES[lvl].google&&!bossTalked){say("O Servidor do Google ▦ quer falar com você antes (aperte A perto dele).");beep(150);}
+  else if(PAGES[lvl].real){realCard();}
+  else{next();}}
  hit();}
-function act(){beep(520,.04);
- if(state==="title"){state="play";load(0);return;}
+function act(){beep(520,.04);if(ov.style.display==="flex")return;
+ if(state==="title"){rebuild();const sv=lsGet(LS_SAVE,null);if(sv&&sv.id)cont();else load(0);return;}
+ if(state==="real"){realCard();return;}
  if(state==="end"){endI++;if(endI<ENDING.length)say(ENDING[endI]);else{state="title";say("");}return;}
  if(dlg.length>1){dlg.shift();msgEl.textContent=dlg[0];return;}
- for(let y=-1;y<=1;y++)for(let x=-1;x<=1;x++)if(tile(px+x,py+y)==="T"){
-  say(teaTalked?["Bule: Ainda sou um bule. Status 418. Orgulhosamente."]:["Bule: Eu sou um bule. Não faço café. RFC 2324, querida.","Alice: Tudo bem! Eu prefiro chá mesmo. ☕","Bule: ...Ninguém nunca disse isso. Siga em frente, viajante."]);teaTalked=true;return;}}
-function hit(){for(const e of enemies)if(e.x===px&&e.y===py){beep(60,.3);say("500! Um erro te acertou. De volta ao início da página.");px=PAGES[lvl].sx;py=PAGES[lvl].sy;}}
+ for(let y=-1;y<=1;y++)for(let x=-1;x<=1;x++){const c=tile(px+x,py+y);
+  if(c==="S"){searchBox();return;}
+  if(c==="K"){if(keys<need){say("Servidor do Google: Bzzz... Traga todos os headers ✦ primeiro, pequena requisição.");return;}
+   say(["Servidor do Google: BEEP. Indexei você, Alice. Status: 200 OK.","Servidor do Google: Você não é spam. Você é... curiosa. Gostei.","Alice: Obrigada! Posso passar?","Servidor do Google: Portal liberado. Boa viagem pelas páginas reais! ▦"]);bossTalked=true;save();return;}
+  if(c==="T"){say(teaTalked?["Bule: Ainda sou um bule. Status 418. Orgulhosamente."]:["Bule: Eu sou um bule. Não faço café. RFC 2324, querida.","Alice: Tudo bem! Eu prefiro chá mesmo. ☕","Bule: ...Ninguém nunca disse isso. Siga em frente, viajante."]);teaTalked=true;return;}}}
+function hit(){for(const e of enemies)if(e.x===px&&e.y===py){beep(60,.3);say(PAGES[lvl].google?"Um Googlebot 🤖 te rastreou! De volta ao início.":"500! Um erro te acertou. De volta ao início da página.");px=PAGES[lvl].sx;py=PAGES[lvl].sy;}}
 function tickEnemies(){for(const e of enemies){const nx=e.x+e.d;if(blocked(tile(nx,e.y))||Math.abs(nx-e.ox)>6)e.d*=-1;else e.x=nx;}hit();}
-function draw(){t++;const P=PAGES[lvl]||PAGES[0];g.fillStyle="#07040f";g.fillRect(0,0,320,240);
+function draw(){t++;const P=PAGES[lvl]||PAGES[0];if(state==="real"&&map){}g.fillStyle="#07040f";g.fillRect(0,0,320,240);
  if(state==="title"){g.fillStyle="#6cf";g.font="bold 18px monospace";g.textAlign="center";
   g.fillText("ALICE",160,70);g.fillStyle="#f6c";g.font="12px monospace";g.fillText("e a Quarta Parede do HTTP",160,92);
-  drawAlice(150,120,1.5);g.fillStyle=(t>>4)%2?"#fff":"#9ff";g.fillText("Toque A / Enter para começar",160,200);
+  drawAlice(150,120,1.5);g.fillStyle=(t>>4)%2?"#fff":"#9ff";g.fillText(lsGet(LS_SAVE,{}).id?"Toque A para continuar":"Toque A / Enter para começar",160,200);g.fillStyle="#fc6";g.font="10px monospace";g.fillText("☰ Menu: novo jogo · 🌐 Meus sites",160,218);
   for(let i=0;i<40;i++){g.fillStyle="#6cf3";g.fillRect((i*53+t)%320,(i*97)%240,2,2);}return;}
  if(state==="end"){const k=Math.min(1,endI/5);g.fillStyle="#fff";g.globalAlpha=k*.9;g.fillRect(0,0,320,240);g.globalAlpha=1;
   g.strokeStyle="#6cf";g.lineWidth=3;g.strokeRect(10+endI*4,10+endI*4,300-endI*8,220-endI*8);
@@ -96,8 +174,10 @@ function draw(){t++;const P=PAGES[lvl]||PAGES[0];g.fillStyle="#07040f";g.fillRec
   else if(c==="G"){if(keys<need){g.fillStyle="#888";g.fillRect(X,Y,T,T);g.fillStyle="#f44";g.font="7px monospace";g.textAlign="center";g.fillText("403",X+10,Y+13);}else{g.fillStyle="#4f84";g.fillRect(X,Y,T,T);}}
   else if(c==="E"){g.fillStyle=keys>=need?"#6cf":"#335";g.beginPath();g.arc(X+10,Y+10,7+Math.sin(t/6)*2,0,7);g.fill();g.fillStyle="#fff";g.font="6px monospace";g.textAlign="center";g.fillText("200",X+10,Y+12);}
   else if(c==="R"){g.fillStyle="#4f8";g.font="14px monospace";g.textAlign="center";g.fillText("↻",X+10,Y+15);}
+  else if(c==="S"){g.fillStyle="#fff";g.fillRect(X+1,Y+5,T-2,10);g.font="9px serif";g.textAlign="center";g.fillText("🔍",X+10,Y+14);}
+  else if(c==="K"){g.fillStyle="#333";g.fillRect(X,Y-20,T,T+20);for(let i=0;i<5;i++){g.fillStyle=["#4285f4","#ea4335","#fbbc05","#34a853","#4285f4"][i];g.fillRect(X+3,Y-17+i*7,(t>>3)%5===i?14:6,3);}}
   else if(c==="T"){g.font="15px serif";g.textAlign="center";g.fillText("☕",X+10,Y+16);}}
- for(const e of enemies){g.fillStyle="#f44";g.font="bold 14px monospace";g.textAlign="center";g.fillText("✖",e.x*T+10,e.y*T+15);}
+ for(const e of enemies){g.fillStyle="#f44";g.font="bold 14px monospace";g.textAlign="center";if(P.google){g.font="14px serif";g.fillText("🤖",e.x*T+10,e.y*T+16);}else g.fillText("✖",e.x*T+10,e.y*T+15);}
  drawAlice(px*T,py*T,1);
  g.fillStyle="#000a";g.fillRect(0,0,320,12);g.fillStyle="#fff";g.font="9px monospace";g.textAlign="left";
  g.fillText(P.name+"  ✦"+keys+"/"+need+"  página "+(lvl+1)+"/"+PAGES.length,4,9);}
@@ -111,7 +191,8 @@ addEventListener("keydown",e=>{const k=KM[e.code];if(k){e.preventDefault();input
 let rep=null;document.querySelectorAll("#pad button[data-k]").forEach(b=>{const k=b.dataset.k;
  b.addEventListener("pointerdown",e=>{e.preventDefault();input(k);clearInterval(rep);if(k!=="act")rep=setInterval(()=>input(k),160);});
  ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,()=>clearInterval(rep)));});
-setInterval(()=>{if(state==="play")tickEnemies();},400);
+setInterval(()=>{if(state==="play"&&ov.style.display!=="flex")tickEnemies();},400);
+rebuild();
 (function loop(){draw();requestAnimationFrame(loop);})();
 say("Uma garota feita de dados quer conhecer quem está do outro lado da tela.");
 </script></body></html>
