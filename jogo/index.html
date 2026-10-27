@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Alice e a Quarta Parede do HTTP</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#07040f;color:#e8e6ff;font-family:"Courier New",monospace;display:flex;flex-direction:column;align-items:center;min-height:100vh;user-select:none;-webkit-user-select:none}
+#bar{width:100%;max-width:640px;display:flex;gap:6px;align-items:center;padding:6px;background:#1a1530;border-bottom:2px solid #6cf}
+#url{flex:1;background:#0b0820;border:1px solid #446;padding:4px 8px;border-radius:12px;font-size:13px;color:#9ff;overflow:hidden;white-space:nowrap}
+#mute{background:none;border:1px solid #6cf;color:#6cf;border-radius:6px;padding:2px 8px;font:inherit}
+canvas{width:100%;max-width:640px;image-rendering:pixelated;display:block;touch-action:none}
+#msg{width:100%;max-width:640px;min-height:64px;padding:8px 10px;background:#120d24;border-top:2px solid #f6c;font-size:14px;line-height:1.35}
+#pad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(2,56px);gap:6px;margin:10px;touch-action:none}
+#pad button{font:bold 22px monospace;background:#241a44;color:#9ff;border:2px solid #6cf;border-radius:10px;box-shadow:0 0 8px #6cf6}
+#pad button:active{background:#6cf;color:#07040f}
+.e{visibility:hidden}
+small{opacity:.6;margin:4px}
+</style></head><body>
+<div id="bar"><span>🔒</span><div id="url">https://alice.local/</div><button id="mute">🔊</button></div>
+<canvas id="c" width="320" height="240"></canvas>
+<div id="msg"></div>
+<div id="pad"><button class="e"></button><button data-k="up">▲</button><button data-k="act">A</button>
+<button data-k="left">◀</button><button data-k="down">▼</button><button data-k="right">▶</button></div>
+<small>Setas/WASD para andar · Espaço/Enter para falar e avançar</small>
+<script>
+"use strict";
+const cv=document.getElementById("c"),g=cv.getContext("2d"),T=20,W=16,H=12;
+const urlEl=document.getElementById("url"),msgEl=document.getElementById("msg");
+// Legenda: # parede . chão P início H header O 404 Z 429 G portão 403 E portal T bule R redirect X erro 500 L link de volta
+const PAGES=[
+{path:"/",name:"Início",bg:"#0d0a22",wall:"#6cf",floor:"#151036",
+ intro:"Alice: Oi! Sou a Alice. Algo me chama do outro lado desta tela... Vou atravessar todas as páginas da web para descobrir. Junte os headers ✦ comigo!",
+ map:["################","#P.............#","#..##......##..#","#..#H......#...#","#..##......##..#","#..............#","#......##......#","#......##......#","#..H.......H...#","#..............#","#.............E#","################"]},
+{path:"/login",name:"Login",bg:"#1b1b1b",wall:"#ccc",floor:"#2a2a2a",
+ intro:"Página de Login. Status 403: o portão ▒ só abre com o header Authorization. Pegue os ✦ e o portão libera.",
+ map:["################","#P....#.......E#","#.....#........#","#..H..#........#","#.....#####G####","#.....#........#","#.....#........#","#..............#","#######...H....#","#........H.....#","#..............#","################"]},
+{path:"/loja",name:"Loja",bg:"#2a1205",wall:"#fa4",floor:"#3a1d0a",
+ intro:"Bem-vinda à Loja! Cuidado: as zonas ░ dão 429 Too Many Requests, deixando você lenta. Os buracos ● são 404: caiu, volta ao início!",
+ map:["################","#P..ZZZZ.......#","#...ZZZZ..O..H.#","#...ZZZZ.......#","#..O.......ZZZ.#","#.....H....ZZZ.#","#.ZZZ......ZZZ.#","#.ZZZ..O.......#","#.ZZZ......O...#","#..H...........#","#......ZZZZ...E#","################"]},
+{path:"/blog/301",name:"Blog (301)",bg:"#0a1f14",wall:"#4f8",floor:"#10301e",
+ intro:"Um Blog cheio de 301 Moved Permanently. Pisar no ↻ te redireciona para outro lugar. Use isso a seu favor!",
+ map:["################","#P.....#.......#","#......#...H...#","#......#.......#","#...R..#....R..#","#......#########","#..H...#.......#","########...R...#","#......#.......#","#..H...#.......#","#.....R#......E#","################"]},
+{path:"/cozinha/418",name:"418 I'm a teapot",bg:"#1f0a1f",wall:"#f6c",floor:"#2e1030",
+ intro:"418 I'm a teapot! Uma página que se recusa a fazer café. Fale com o bule ☕ (aperte A perto dele).",
+ map:["################","#P.............#","#..............#","#....######....#","#....#....#....#","#....#.T..#....#","#....#....#....#","#....##..##....#","#..H........H..#","#..............#","#.............E#","################"]},
+{path:"/servidor/500",name:"500 Internal Server Error",bg:"#200505",wall:"#f44",floor:"#300a0a",
+ intro:"O Servidor está em pânico: 500 Internal Server Error! Desvie dos erros ✖ e recupere os headers.",
+ map:["################","#P.............#","#.X............#","#......H.......#","#.........X....#","#..H...........#","#.....X........#","#...........H..#","#..X...........#","#..............#","#.............E#","################"]}
+];
+const ENDING=["Alice: Pronto... resposta 200 OK. Mas espera.","Alice: Essa barra lá em cima... é um navegador. Eu estou DENTRO de uma página.","Alice: E você... você é quem está mandando as requisições. Os botões. O toque.","Alice: Então a resposta que eu procurava nunca esteve num servidor. A resposta é você.","Alice: Obrigada por me trazer até aqui, jogador. Tipo em SAO: o mundo é de dados, mas o laço é real. ✦","Alice: Vou atravessar a quarta parede agora. Te vejo do lado de fora da tela! 💙","FIM — Obrigado por jogar. Aperte A para recomeçar."];
+let state="title",lvl=0,map,px,py,keys=0,need=0,slow=0,enemies=[],dlg=[],t=0,steps=0,teaTalked=false,endI=0,muted=false,AC=null;
+function beep(f,d){if(muted)return;try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();const o=AC.createOscillator(),v=AC.createGain();o.type="square";o.frequency.value=f;v.gain.value=.05;o.connect(v);v.connect(AC.destination);o.start();o.stop(AC.currentTime+(d||.08));}catch(e){}}
+document.getElementById("mute").onclick=e=>{muted=!muted;e.target.textContent=muted?"🔇":"🔊";};
+function say(lines){dlg=Array.isArray(lines)?lines.slice():[lines];msgEl.textContent=dlg[0];}
+function load(i){lvl=i;const P=PAGES[i];map=P.map.map(r=>r.split(""));keys=0;need=0;enemies=[];teaTalked=false;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const ch=map[y][x];
+  if(ch==="P"){px=x;py=y;map[y][x]=".";} if(ch==="H")need++;
+  if(ch==="X"){enemies.push({x:x,y:y,d:1,ox:x});map[y][x]=".";}}
+ P.sx=px;P.sy=py;urlEl.textContent="https://alice.local"+P.path;say(P.intro);beep(660,.12);}
+function tile(x,y){return (x<0||y<0||x>=W||y>=H)?"#":map[y][x];}
+function blocked(c){return c==="#"||(c==="G"&&keys<need);}
+function move(dx,dy){if(state!=="play"||dlg.length>1)return;
+ if(slow>0&&(steps++%2)){return;} const nx=px+dx,ny=py+dy,c=tile(nx,ny);
+ if(blocked(c)){if(c==="G")say("403 Forbidden: faltam "+(need-keys)+" header(s).");beep(120);return;}
+ px=nx;py=ny;
+ if(c==="H"){map[py][px]=".";keys++;beep(990);say("✦ Header coletado! ("+keys+"/"+need+")"+(keys===need?" Portões abertos!":""));}
+ if(c==="O"){beep(80,.25);say("404 Not Found! Alice caiu no vazio e voltou ao começo.");px=PAGES[lvl].sx;py=PAGES[lvl].sy;}
+ if(c==="Z"){slow=1;}else slow=0;
+ if(c==="R"){const fl=[];for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(map[y][x]==="."&&!(x===px&&y===py))fl.push([x,y]);
+  const p=fl[Math.floor(Math.random()*fl.length)];px=p[0];py=p[1];beep(440);say("301 Moved Permanently → Alice foi redirecionada!");}
+ if(c==="E"){if(keys<need){say("O portal pede todos os headers ("+keys+"/"+need+").");beep(150);}
+  else if(lvl===PAGES.length-1){state="end";endI=0;urlEl.textContent="https://você.real/";say(ENDING[0]);beep(880,.3);}
+  else{load(lvl+1);}}
+ hit();}
+function act(){beep(520,.04);
+ if(state==="title"){state="play";load(0);return;}
+ if(state==="end"){endI++;if(endI<ENDING.length)say(ENDING[endI]);else{state="title";say("");}return;}
+ if(dlg.length>1){dlg.shift();msgEl.textContent=dlg[0];return;}
+ for(let y=-1;y<=1;y++)for(let x=-1;x<=1;x++)if(tile(px+x,py+y)==="T"){
+  say(teaTalked?["Bule: Ainda sou um bule. Status 418. Orgulhosamente."]:["Bule: Eu sou um bule. Não faço café. RFC 2324, querida.","Alice: Tudo bem! Eu prefiro chá mesmo. ☕","Bule: ...Ninguém nunca disse isso. Siga em frente, viajante."]);teaTalked=true;return;}}
+function hit(){for(const e of enemies)if(e.x===px&&e.y===py){beep(60,.3);say("500! Um erro te acertou. De volta ao início da página.");px=PAGES[lvl].sx;py=PAGES[lvl].sy;}}
+function tickEnemies(){for(const e of enemies){const nx=e.x+e.d;if(blocked(tile(nx,e.y))||Math.abs(nx-e.ox)>6)e.d*=-1;else e.x=nx;}hit();}
+function draw(){t++;const P=PAGES[lvl]||PAGES[0];g.fillStyle="#07040f";g.fillRect(0,0,320,240);
+ if(state==="title"){g.fillStyle="#6cf";g.font="bold 18px monospace";g.textAlign="center";
+  g.fillText("ALICE",160,70);g.fillStyle="#f6c";g.font="12px monospace";g.fillText("e a Quarta Parede do HTTP",160,92);
+  drawAlice(150,120,1.5);g.fillStyle=(t>>4)%2?"#fff":"#9ff";g.fillText("Toque A / Enter para começar",160,200);
+  for(let i=0;i<40;i++){g.fillStyle="#6cf3";g.fillRect((i*53+t)%320,(i*97)%240,2,2);}return;}
+ if(state==="end"){const k=Math.min(1,endI/5);g.fillStyle="#fff";g.globalAlpha=k*.9;g.fillRect(0,0,320,240);g.globalAlpha=1;
+  g.strokeStyle="#6cf";g.lineWidth=3;g.strokeRect(10+endI*4,10+endI*4,300-endI*8,220-endI*8);
+  drawAlice(150,100,1.5+endI*.5);return;}
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const c=map[y][x],X=x*T,Y=y*T;g.fillStyle=P.floor;g.fillRect(X,Y,T,T);
+  if(c==="#"){g.fillStyle=P.wall;g.fillRect(X,Y,T,T);g.fillStyle=P.bg;g.fillRect(X+2,Y+2,T-4,T-4);}
+  else if(c==="H"){g.fillStyle="#ff6";g.font="14px monospace";g.textAlign="center";g.fillText("✦",X+10,Y+15+Math.sin(t/8+x)*2);}
+  else if(c==="O"){g.fillStyle="#000";g.beginPath();g.arc(X+10,Y+10,8,0,7);g.fill();g.fillStyle="#555";g.font="6px monospace";g.textAlign="center";g.fillText("404",X+10,Y+12);}
+  else if(c==="Z"){g.fillStyle="#fa43";g.fillRect(X,Y,T,T);if(x%2===y%2){g.fillStyle="#fa4";g.font="6px monospace";g.textAlign="center";g.fillText("429",X+10,Y+12);}}
+  else if(c==="G"){if(keys<need){g.fillStyle="#888";g.fillRect(X,Y,T,T);g.fillStyle="#f44";g.font="7px monospace";g.textAlign="center";g.fillText("403",X+10,Y+13);}else{g.fillStyle="#4f84";g.fillRect(X,Y,T,T);}}
+  else if(c==="E"){g.fillStyle=keys>=need?"#6cf":"#335";g.beginPath();g.arc(X+10,Y+10,7+Math.sin(t/6)*2,0,7);g.fill();g.fillStyle="#fff";g.font="6px monospace";g.textAlign="center";g.fillText("200",X+10,Y+12);}
+  else if(c==="R"){g.fillStyle="#4f8";g.font="14px monospace";g.textAlign="center";g.fillText("↻",X+10,Y+15);}
+  else if(c==="T"){g.font="15px serif";g.textAlign="center";g.fillText("☕",X+10,Y+16);}}
+ for(const e of enemies){g.fillStyle="#f44";g.font="bold 14px monospace";g.textAlign="center";g.fillText("✖",e.x*T+10,e.y*T+15);}
+ drawAlice(px*T,py*T,1);
+ g.fillStyle="#000a";g.fillRect(0,0,320,12);g.fillStyle="#fff";g.font="9px monospace";g.textAlign="left";
+ g.fillText(P.name+"  ✦"+keys+"/"+need+"  página "+(lvl+1)+"/"+PAGES.length,4,9);}
+function drawAlice(x,y,s){g.save();g.translate(x,y);g.scale(s,s);const b=Math.sin(t/8)>0?0:1;
+ g.fillStyle="#fdb";g.fillRect(6,3+b,8,7);g.fillStyle="#f6c";g.fillRect(5,1+b,10,4);g.fillRect(4,3+b,2,9);g.fillRect(14,3+b,2,9);
+ g.fillStyle="#6cf";g.fillRect(6,10+b,8,7);g.fillStyle="#fff";g.fillRect(8,6+b,1,1);g.fillRect(11,6+b,1,1);
+ g.fillStyle="#335";g.fillRect(6,17,3,3);g.fillRect(11,17,3,3);g.restore();}
+const KM={ArrowUp:"up",KeyW:"up",ArrowDown:"down",KeyS:"down",ArrowLeft:"left",KeyA:"left",ArrowRight:"right",KeyD:"right",Space:"act",Enter:"act"};
+function input(k){if(k==="act")act();else move(k==="left"?-1:k==="right"?1:0,k==="up"?-1:k==="down"?1:0);}
+addEventListener("keydown",e=>{const k=KM[e.code];if(k){e.preventDefault();input(k);}});
+let rep=null;document.querySelectorAll("#pad button[data-k]").forEach(b=>{const k=b.dataset.k;
+ b.addEventListener("pointerdown",e=>{e.preventDefault();input(k);clearInterval(rep);if(k!=="act")rep=setInterval(()=>input(k),160);});
+ ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,()=>clearInterval(rep)));});
+setInterval(()=>{if(state==="play")tickEnemies();},400);
+(function loop(){draw();requestAnimationFrame(loop);})();
+say("Uma garota feita de dados quer conhecer quem está do outro lado da tela.");
+</script></body></html>
